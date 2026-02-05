@@ -7,6 +7,7 @@ A simple command-line tool to upload files to Dropbox shared folders using the D
 - Upload files to Dropbox from the command line
 - Support for custom destination paths
 - Secure token management via `.env` file
+- **OAuth 2.0 refresh token support** - automatic token renewal (no more expired tokens!)
 - Comprehensive error handling
 
 ## Installation
@@ -17,9 +18,62 @@ A simple command-line tool to upload files to Dropbox shared folders using the D
 pip install dropbox python-dotenv
 ```
 
-### 2. Set Up Dropbox Access Token
+### 2. Set Up Dropbox Authentication
 
-#### Option 1: Using .env file (Recommended)
+#### Option 1: OAuth 2.0 Refresh Token (Recommended)
+
+Refresh tokens automatically renew expired access tokens, so you won't encounter authentication errors.
+
+**Step 1: Get App Credentials**
+
+1. Navigate to [https://www.dropbox.com/developers/apps](https://www.dropbox.com/developers/apps)
+2. Create a new app or select an existing one
+3. In your app's settings page, find:
+   - **App key** (also called `client_id`)
+   - **App secret** (also called `client_secret`)
+4. Copy these values - you'll need them in the next step
+
+**Step 2: Configure Redirect URI**
+
+1. In your app's settings page, scroll to **"OAuth 2"** section
+2. Under **"Redirect URIs"**, click **"Add"**
+3. Add: `http://localhost:8080`
+4. Click **"Add"** to save
+
+**Step 3: Obtain Refresh Token**
+
+Run the OAuth helper script:
+
+```bash
+python dropbox_oauth.py
+```
+
+The script will:
+1. Prompt you for your App Key and App Secret
+2. Open a browser window for authorization
+3. Guide you through the OAuth flow
+4. Display your credentials to add to `.env`
+
+**Step 4: Add Credentials to .env**
+
+1. Copy the example environment file:
+   ```bash
+   copy .env.example .env
+   ```
+   (On Linux/Mac: `cp .env.example .env`)
+
+2. Edit `.env` and add the credentials shown by the OAuth helper:
+   ```
+   DROPBOX_APP_KEY=your_app_key_here
+   DROPBOX_APP_SECRET=your_app_secret_here
+   DROPBOX_REFRESH_TOKEN=your_refresh_token_here
+   ```
+
+That's it! The script will now automatically refresh expired tokens.
+
+#### Option 2: Legacy Access Token (Not Recommended)
+
+Access tokens expire and cannot be refreshed automatically. Use refresh token authentication instead.
 
 1. Copy the example environment file:
    ```bash
@@ -32,17 +86,7 @@ pip install dropbox python-dotenv
    DROPBOX_ACCESS_TOKEN=your_access_token_here
    ```
 
-#### Option 2: Using Environment Variable
-
-```bash
-# Windows PowerShell
-$env:DROPBOX_ACCESS_TOKEN="your_access_token_here"
-
-# Linux/Mac
-export DROPBOX_ACCESS_TOKEN="your_access_token_here"
-```
-
-**Note**: The script will first check for `.env` file, then fall back to environment variable if `.env` is not found.
+**Note**: The script will first check for `.env` file, then fall back to environment variables if `.env` is not found.
 
 ## Dropbox App Registration Instructions
 
@@ -66,25 +110,21 @@ export DROPBOX_ACCESS_TOKEN="your_access_token_here"
 1. In your app's settings page, you'll see:
    - **App key** (also called `client_id`)
    - **App secret** (also called `client_secret`)
-2. These are your API credentials (you may need these for OAuth flow, but not for simple access token)
+2. These are your OAuth credentials needed for refresh token authentication
 
-### Step 4: Generate Access Token
+### Step 4: Configure OAuth Settings
 
 1. In your app's settings page, scroll to **"OAuth 2"** section
-2. Under **"Generated access token"**, click **"Generate"**
-3. Copy the generated access token (this is what you'll use in the script)
-4. **Important**: Keep this token secure and don't share it publicly
+2. Under **"Redirect URIs"**, click **"Add"**
+3. Add: `http://localhost:8080`
+4. Click **"Add"** to save
+5. Ensure your app has **"files.content.write"** permission (usually enabled by default for Full Dropbox access)
 
-### Step 5: Set Permissions (if needed)
+### Step 5: Obtain Refresh Token
 
-- Ensure your app has **"files.content.write"** permission
-- This is usually enabled by default for Full Dropbox access
+Use the provided `dropbox_oauth.py` helper script to obtain a refresh token (see "Set Up Dropbox Authentication" section above).
 
-### Step 6: Configure Redirect URI (for OAuth flow)
-
-- If using OAuth flow (not needed for generated access token):
-  - Add redirect URI: `http://localhost:8080` or `http://localhost:5000`
-  - This is only needed if implementing full OAuth flow
+**Note**: For legacy access token authentication (not recommended), you can generate a temporary access token in the app settings, but it will expire and cannot be refreshed automatically.
 
 ## Usage
 
@@ -110,9 +150,9 @@ Or use the short form:
 python dropbox_upload.py document.pdf -d /SharedFolder/document.pdf
 ```
 
-### Override Access Token
+### Override Access Token (Legacy)
 
-You can override the access token from command line:
+You can override the access token from command line (legacy mode, tokens expire):
 
 ```bash
 python dropbox_upload.py document.pdf --token your_token_here
@@ -123,6 +163,8 @@ Or use the short form:
 ```bash
 python dropbox_upload.py document.pdf -t your_token_here
 ```
+
+**Note**: Using `--token` bypasses refresh token authentication. The token will expire and cannot be refreshed automatically.
 
 ### Help
 
@@ -150,7 +192,9 @@ python dropbox_upload.py image.jpg --destination /Photos/2024/image.jpg
 The script handles various error cases:
 
 - **File not found**: If the local file doesn't exist
-- **Authentication errors**: If the access token is invalid
+- **Authentication errors**: If credentials are invalid or expired
+  - With refresh token: Automatically refreshes expired access tokens
+  - With legacy access token: Shows helpful error message with migration instructions
 - **API errors**: If Dropbox API returns an error
 - **Network errors**: If there's a connection issue
 - **Permission errors**: If file permissions are incorrect
@@ -168,19 +212,48 @@ The script handles various error cases:
 
 ## Troubleshooting
 
-### "DROPBOX_ACCESS_TOKEN not found"
-- Make sure you've created a `.env` file with your token, or
-- Set the `DROPBOX_ACCESS_TOKEN` environment variable
+### "Unable to refresh access token without refresh token and app key"
 
-### "Authentication error"
-- Verify your access token is correct
-- Check if the token has expired (generate a new one if needed)
-- Ensure your app has the correct permissions
+This error occurs when using a temporary access token that has expired. To fix:
+
+1. **Migrate to refresh token authentication** (recommended):
+   - Get your App Key and App Secret from [Dropbox App Console](https://www.dropbox.com/developers/apps)
+   - Run `python dropbox_oauth.py` to obtain a refresh token
+   - Add `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN` to your `.env` file
+
+2. **Or use legacy access token** (temporary fix):
+   - Generate a new access token from your app settings
+   - Add `DROPBOX_ACCESS_TOKEN` to your `.env` file
+   - Note: This token will expire again and you'll need to repeat this process
+
+### "Dropbox credentials not found"
+
+- Make sure you've created a `.env` file with your credentials
+- For refresh token auth: Set `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN`
+- For legacy auth: Set `DROPBOX_ACCESS_TOKEN`
+- Or set the corresponding environment variables
+
+### "Authentication error: Token expired"
+
+- If using refresh token: The script should auto-refresh. If this error appears, check that your refresh token, app key, and app secret are correct
+- If using legacy access token: Generate a new access token from your app settings, or migrate to refresh token authentication
 
 ### "File not found"
 - Check that the file path is correct
 - Use absolute paths if relative paths don't work
 - On Windows, use forward slashes or escaped backslashes
+
+### OAuth Helper Script Issues
+
+**"Authorization Failed" or "No OAuth result received"**
+- Make sure `http://localhost:8080` is added to your app's redirect URIs
+- Check that your App Key and App Secret are correct
+- Ensure no firewall is blocking localhost:8080
+- Try running the script again
+
+**Browser doesn't open automatically**
+- Copy the authorization URL from the terminal
+- Paste it into your browser manually
 
 ## License
 

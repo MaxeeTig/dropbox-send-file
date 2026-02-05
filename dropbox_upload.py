@@ -13,21 +13,37 @@ import dropbox
 from dropbox.exceptions import AuthError, ApiError, HttpError
 
 
-def upload_file(file_path, dropbox_path, access_token):
+def upload_file(file_path, dropbox_path, app_key=None, app_secret=None, refresh_token=None, access_token=None):
     """
     Upload a file to Dropbox.
     
     Args:
         file_path: Path to the local file to upload
         dropbox_path: Destination path in Dropbox (e.g., /SharedFolder/filename.txt)
-        access_token: Dropbox API access token
+        app_key: Dropbox app key (client_id) - required for refresh token auth
+        app_secret: Dropbox app secret (client_secret) - required for refresh token auth
+        refresh_token: Dropbox refresh token - preferred method (auto-refreshes expired tokens)
+        access_token: Dropbox access token - legacy method (expires, use refresh_token instead)
         
     Returns:
         tuple: (success: bool, message: str)
     """
     try:
         # Initialize Dropbox client
-        dbx = dropbox.Dropbox(access_token)
+        # Prefer refresh token authentication (auto-refreshes expired tokens)
+        if refresh_token and app_key and app_secret:
+            dbx = dropbox.Dropbox(
+                app_key=app_key,
+                app_secret=app_secret,
+                oauth2_refresh_token=refresh_token
+            )
+        elif access_token:
+            # Legacy mode: using access token directly (will expire)
+            print("Warning: Using access token directly. Tokens expire and cannot be refreshed.", file=sys.stderr)
+            print("Consider migrating to refresh token authentication. See README.md for details.", file=sys.stderr)
+            dbx = dropbox.Dropbox(access_token)
+        else:
+            return False, "Authentication error: Either refresh_token+app_key+app_secret or access_token must be provided"
         
         # Read file in binary mode
         with open(file_path, 'rb') as f:
@@ -47,7 +63,17 @@ def upload_file(file_path, dropbox_path, access_token):
         return True, f"Successfully uploaded to Dropbox: {dropbox_path}"
         
     except AuthError as e:
-        return False, f"Authentication error: {e}"
+        error_msg = str(e)
+        if 'expired' in error_msg.lower() or 'expired_access_token' in error_msg:
+            return False, (
+                f"Authentication error: Token expired. {error_msg}\n"
+                "To fix this, set up refresh token authentication:\n"
+                "1. Get your app_key and app_secret from https://www.dropbox.com/developers/apps\n"
+                "2. Run: python dropbox_oauth.py\n"
+                "3. Add the credentials to your .env file\n"
+                "See README.md for detailed instructions."
+            )
+        return False, f"Authentication error: {error_msg}"
     except ApiError as e:
         return False, f"Dropbox API error: {e.error}"
     except HttpError as e:
@@ -60,26 +86,45 @@ def upload_file(file_path, dropbox_path, access_token):
         return False, f"Unexpected error: {e}"
 
 
-def get_access_token():
+def get_oauth_credentials():
     """
-    Get Dropbox access token from .env file or environment variable.
+    Get Dropbox OAuth credentials from .env file or environment variables.
+    Supports both refresh token (recommended) and legacy access token methods.
     
     Returns:
-        str: Access token or None if not found
+        tuple: (app_key, app_secret, refresh_token, access_token) or None if insufficient credentials
     """
     # Load .env file if it exists
     load_dotenv()
     
-    # Try to get token from environment (loaded from .env or system env)
-    token = os.getenv('DROPBOX_ACCESS_TOKEN')
+    # Try to get refresh token credentials (preferred method)
+    app_key = os.getenv('DROPBOX_APP_KEY')
+    app_secret = os.getenv('DROPBOX_APP_SECRET')
+    refresh_token = os.getenv('DROPBOX_REFRESH_TOKEN')
     
-    if not token:
-        print("Error: DROPBOX_ACCESS_TOKEN not found.", file=sys.stderr)
-        print("Please create a .env file with DROPBOX_ACCESS_TOKEN=your_token", file=sys.stderr)
-        print("or set the DROPBOX_ACCESS_TOKEN environment variable.", file=sys.stderr)
-        return None
+    # Try to get legacy access token (fallback)
+    access_token = os.getenv('DROPBOX_ACCESS_TOKEN')
     
-    return token
+    # Check for refresh token setup (recommended)
+    if refresh_token and app_key and app_secret:
+        return (app_key, app_secret, refresh_token, None)
+    
+    # Fallback to legacy access token
+    if access_token:
+        print("Warning: Using legacy access token authentication.", file=sys.stderr)
+        print("Access tokens expire and cannot be refreshed automatically.", file=sys.stderr)
+        print("Consider migrating to refresh token authentication. See README.md for details.", file=sys.stderr)
+        return (None, None, None, access_token)
+    
+    # No credentials found
+    print("Error: Dropbox credentials not found.", file=sys.stderr)
+    print("\nFor refresh token authentication (recommended):", file=sys.stderr)
+    print("  Set DROPBOX_APP_KEY, DROPBOX_APP_SECRET, and DROPBOX_REFRESH_TOKEN in .env", file=sys.stderr)
+    print("  Run 'python dropbox_oauth.py' to obtain a refresh token", file=sys.stderr)
+    print("\nFor legacy access token authentication:", file=sys.stderr)
+    print("  Set DROPBOX_ACCESS_TOKEN in .env (note: tokens expire)", file=sys.stderr)
+    print("\nSee README.md for detailed setup instructions.", file=sys.stderr)
+    return None
 
 
 def main():
@@ -112,7 +157,7 @@ Examples:
         '--token', '-t',
         type=str,
         default=None,
-        help='Dropbox access token (overrides .env and environment variable)'
+        help='Dropbox access token (legacy, overrides .env - tokens expire)'
     )
     
     args = parser.parse_args()
@@ -127,13 +172,15 @@ Examples:
         print(f"Error: Path is not a file: {file_path}", file=sys.stderr)
         sys.exit(1)
     
-    # Get access token
+    # Get OAuth credentials
     if args.token:
-        access_token = args.token
+        # Legacy mode: use provided access token
+        app_key, app_secret, refresh_token, access_token = None, None, None, args.token
     else:
-        access_token = get_access_token()
-        if not access_token:
+        credentials = get_oauth_credentials()
+        if not credentials:
             sys.exit(1)
+        app_key, app_secret, refresh_token, access_token = credentials
     
     # Determine Dropbox destination path
     if args.destination:
@@ -146,7 +193,14 @@ Examples:
         dropbox_path = '/' + file_path.name
     
     # Upload file
-    success, message = upload_file(str(file_path), dropbox_path, access_token)
+    success, message = upload_file(
+        str(file_path), 
+        dropbox_path,
+        app_key=app_key,
+        app_secret=app_secret,
+        refresh_token=refresh_token,
+        access_token=access_token
+    )
     
     if success:
         print(message)
