@@ -20,9 +20,7 @@ pip install dropbox python-dotenv
 
 ### 2. Set Up Dropbox Authentication
 
-#### Option 1: OAuth 2.0 Refresh Token (Recommended)
-
-Refresh tokens automatically renew expired access tokens, so you won't encounter authentication errors.
+This tool uses OAuth 2.0 refresh token authentication, which automatically renews expired access tokens so you won't encounter authentication errors.
 
 **Step 1: Get App Credentials**
 
@@ -56,7 +54,7 @@ The script will:
 
 **Step 4: Add Credentials to .env**
 
-1. Copy the example environment file:
+1. Create a `.env` file in the project directory (or copy from `.env.example` if it exists):
    ```bash
    copy .env.example .env
    ```
@@ -70,21 +68,6 @@ The script will:
    ```
 
 That's it! The script will now automatically refresh expired tokens.
-
-#### Option 2: Legacy Access Token (Not Recommended)
-
-Access tokens expire and cannot be refreshed automatically. Use refresh token authentication instead.
-
-1. Copy the example environment file:
-   ```bash
-   copy .env.example .env
-   ```
-   (On Linux/Mac: `cp .env.example .env`)
-
-2. Edit `.env` and add your Dropbox access token:
-   ```
-   DROPBOX_ACCESS_TOKEN=your_access_token_here
-   ```
 
 **Note**: The script will first check for `.env` file, then fall back to environment variables if `.env` is not found.
 
@@ -124,8 +107,6 @@ Access tokens expire and cannot be refreshed automatically. Use refresh token au
 
 Use the provided `dropbox_oauth.py` helper script to obtain a refresh token (see "Set Up Dropbox Authentication" section above).
 
-**Note**: For legacy access token authentication (not recommended), you can generate a temporary access token in the app settings, but it will expire and cannot be refreshed automatically.
-
 ## Usage
 
 ### Basic Usage
@@ -150,22 +131,6 @@ Or use the short form:
 python dropbox_upload.py document.pdf -d /SharedFolder/document.pdf
 ```
 
-### Override Access Token (Legacy)
-
-You can override the access token from command line (legacy mode, tokens expire):
-
-```bash
-python dropbox_upload.py document.pdf --token your_token_here
-```
-
-Or use the short form:
-
-```bash
-python dropbox_upload.py document.pdf -t your_token_here
-```
-
-**Note**: Using `--token` bypasses refresh token authentication. The token will expire and cannot be refreshed automatically.
-
 ### Help
 
 View all available options:
@@ -185,6 +150,9 @@ python dropbox_upload.py report.pdf --destination /Shared/Reports/report.pdf
 
 # Upload to a subfolder
 python dropbox_upload.py image.jpg --destination /Photos/2024/image.jpg
+
+# Upload with short destination flag
+python dropbox_upload.py document.pdf -d /Documents/document.pdf
 ```
 
 ## Error Handling
@@ -193,8 +161,8 @@ The script handles various error cases:
 
 - **File not found**: If the local file doesn't exist
 - **Authentication errors**: If credentials are invalid or expired
-  - With refresh token: Automatically refreshes expired access tokens
-  - With legacy access token: Shows helpful error message with migration instructions
+  - The script automatically refreshes expired access tokens using the refresh token
+  - Shows helpful error messages if the refresh token is invalid or revoked
 - **API errors**: If Dropbox API returns an error
 - **Network errors**: If there's a connection issue
 - **Permission errors**: If file permissions are incorrect
@@ -202,7 +170,7 @@ The script handles various error cases:
 ## Security Notes
 
 - Never commit your `.env` file to version control
-- Keep your access token secure and private
+- Keep your app key, app secret, and refresh token secure and private
 - The `.env` file is automatically ignored by git (see `.gitignore`)
 
 ## File Size Limitations
@@ -212,31 +180,28 @@ The script handles various error cases:
 
 ## Troubleshooting
 
-### "Unable to refresh access token without refresh token and app key"
-
-This error occurs when using a temporary access token that has expired. To fix:
-
-1. **Migrate to refresh token authentication** (recommended):
-   - Get your App Key and App Secret from [Dropbox App Console](https://www.dropbox.com/developers/apps)
-   - Run `python dropbox_oauth.py` to obtain a refresh token
-   - Add `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN` to your `.env` file
-
-2. **Or use legacy access token** (temporary fix):
-   - Generate a new access token from your app settings
-   - Add `DROPBOX_ACCESS_TOKEN` to your `.env` file
-   - Note: This token will expire again and you'll need to repeat this process
-
 ### "Dropbox credentials not found"
 
 - Make sure you've created a `.env` file with your credentials
-- For refresh token auth: Set `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN`
-- For legacy auth: Set `DROPBOX_ACCESS_TOKEN`
+- Set all three required variables: `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN`
 - Or set the corresponding environment variables
+- Run `python dropbox_oauth.py` to obtain a refresh token if you don't have one
 
-### "Authentication error: Token expired"
+### "Authentication error: invalid_access_token" or "Token expired"
 
-- If using refresh token: The script should auto-refresh. If this error appears, check that your refresh token, app key, and app secret are correct
-- If using legacy access token: Generate a new access token from your app settings, or migrate to refresh token authentication
+This error can occur even with refresh token authentication. Possible causes:
+
+1. **The refresh token is invalid or revoked**
+   - Run `python dropbox_oauth.py` to generate a new refresh token
+   - Update your `.env` file with the new refresh token
+
+2. **The app key or app secret is incorrect**
+   - Verify your App Key and App Secret at [Dropbox App Console](https://www.dropbox.com/developers/apps)
+   - Make sure they match the app you used to generate the refresh token
+
+3. **The refresh token was generated for a different app**
+   - Ensure the App Key and App Secret in your `.env` file match the app used to generate the refresh token
+   - If you created a new app, you'll need to generate a new refresh token for that app
 
 ### "File not found"
 - Check that the file path is correct
