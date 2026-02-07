@@ -39,3 +39,6 @@ Thumbs.db
 
 # Documents
 *.pdf
+
+# Log files
+*.log
